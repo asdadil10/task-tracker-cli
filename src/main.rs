@@ -1,0 +1,328 @@
+use std::{env};
+use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
+use serde::{Deserialize, Serialize};
+use std::hash::{DefaultHasher,Hash,Hasher};
+fn calculate_hash<T: Hash>(t: &T) -> u64 {
+    let mut s = DefaultHasher::new();
+    t.hash(&mut s);
+    s.finish()
+}
+#[derive(Serialize, Deserialize, Debug, Hash)]
+pub enum Status{
+    RUNNING,
+    PAUSED,
+    TODO,
+    COMPLETED,
+}
+impl Status{
+    fn to_string(&self)->String{
+        match self {
+            Status::RUNNING=>   "Running".to_string(),
+            Status::PAUSED=>    "Paused".to_string(),
+            Status::TODO=>      "Todo".to_string(),
+            Status::COMPLETED=> "Completed".to_string(),
+        }
+    }
+}
+#[derive(Serialize, Deserialize, Debug, Hash)]
+pub struct Task{
+    pub id: u32,
+    pub name:String,
+    pub tag:Option<String>,
+    pub time:u64,
+    pub status:Status,
+    pub started_at:Option<u64>
+}
+fn get_formated_time(time_in_s:&u64)-> String {
+        format!("{}H:{}M:{}S",
+                (time_in_s/3600)%24,
+                (time_in_s/60)%60,
+                time_in_s%60
+        ).to_string()
+    }
+impl Task {
+    // ID | TIME | STATUS | NAME
+    // Note : in list you will sort by tag so no need to redisplay tag
+    fn to_string(&self) -> String{
+        format!("{} | {} | {} | {} | Start Time: {}",
+                self.id,
+                get_formated_time(&self.time),
+                self.status.to_string(),
+                self.name,
+                get_formated_time(&self.started_at.unwrap_or(0)),
+        ).to_string()
+    }
+}
+#[derive(Serialize, Deserialize, Default, Hash)]
+pub struct TaskStore {
+    pub next_id: u32,
+    pub tasks: Vec<Task>,
+}
+const APP_VERSION: &str = "0.1.0";
+fn main() {
+    let args: Vec<String> = env::args().collect();
+    let mut store = load_store().unwrap_or_default();
+    let before = calculate_hash(&store);
+    // args[0] is always the path to the binary itself
+    // User-supplied arguments start at index 1
+    if args.len() < 2 {
+        println!("No argument provided...");
+        help(&args)
+    } else if !help_asked(&args){
+        match args[1].as_str() {
+            "add" => add(&args,&mut store),
+            "start" => start(&args,&mut store),
+            "stop"  => stop(&args,&mut store),
+            "done" => done(&args,&mut store),
+            "list" =>list(&args,&store),
+            "summary" => summary(&args,&store),
+            "delete" => delete(&args,&mut store),
+            "help" | "-h" | "--help" => help(&args),
+            "-v" | "--version" => println!("tt v{}", APP_VERSION),
+            _ => println!("Unknown command: {}", args[1]),
+        }
+        if calculate_hash(&store) != before{
+            save_store(&store);
+        }
+    }
+}
+
+fn load_store() -> Option<TaskStore>{
+    //println!("Loading store...");
+    None
+    //todo!("Implement loading of store");
+}
+fn save_store(store: &TaskStore) {
+    println!("Saving...");
+    //todo!("Implement storing the updated tasks.json")
+}
+
+fn help_text() -> String{
+    "USAGE:
+        tt <COMMAND>
+
+    COMMANDS:
+        add       Add a new task
+        start     Start tracking time on a task (pauses any active task)
+        stop      Stop the currently running timer
+        done      Mark a task as completed
+        list      Display tasks and logged time
+        summary   Show total time grouped by tag
+        delete    Remove a task
+        help      Print this message or the help of the given subcommand(s)
+
+    OPTIONS:
+        -h, --help       Print help
+        -V, --version    Print version
+
+    EXAMPLES:
+        tt add \"Fix login bug\" --tag backend
+        tt start 1
+        tt list --tag backend
+        tt done 1".to_string()
+}
+
+// if user writes ./tt help [cmd]
+fn help(args: &Vec<String>) {
+    let target = match (args.get(1).map(|x| x.as_str()),args.get(2).map(|x| x.as_str())) {
+        (Some("help"),Some(cmd)) => cmd,
+        (Some(cmd),Some("-h" | "--help")) => cmd,
+        (Some("-h" | "--help" | "help"), None) | (None,None) => "",
+        (_,Some(cmd)) => cmd,
+        (Some(cmd), None) => cmd,
+    };
+    if args.len() > 3 {
+        eprintln!("Too many arguments for help.");
+        std::process::exit(1);
+    }
+    // let subcommand = args.get(if args.len() > 2 {2} else {1}).map(|x| x.as_str()).unwrap_or("");
+        match target {
+            "add" => println!("Usage: tt add <TITLE> [--tag | -t <TAG>]\nAdd a new task."),
+            "start" => println!("Usage: tt start <ID>\nStart tracking time on a task (pauses any active task)."),
+            "stop" => println!("Usage: tt stop\nStop the currently running timer."),
+            "done" => println!("Usage: tt done <ID>\nMark a task as completed."),
+            "list" => println!("Usage: tt list [--all] [--tag | -t <TAG>]\nDisplay tasks and logged time."),
+            "summary" => println!("Usage: tt summary [--all | -a]\nShow total time grouped by tag."),
+            "delete" => println!("Usage: tt delete <ID>\nRemove a task."),
+            "--help"|"-h"|"help"|"" => println!("{}",help_text()),
+            _ => {
+                eprintln!("Unknown command: {}", target);
+                std::process::exit(1);
+            }
+        }
+}
+
+// helper to print help for a specific
+fn help_for(name:String){
+    help(&["".to_string(),name].to_vec())
+}
+
+// if user writes ./tt cmd [-h | --help]
+fn help_asked(args:&Vec<String>) -> bool{
+    let mut asked = false;
+    let task = args.get(2).map(|s| s.as_str()).unwrap_or("");
+    if (task == "-h" )|( task == "--help"){
+        help(&args);
+        asked = true;
+    };
+    asked
+}
+
+// if arg.len() > max exit the program
+fn check_len(args:&Vec<String>,max_len:usize) {
+    if args.len() > max_len{
+        eprintln!("Too many arguments for {}.",args[1]);
+        help_for(args[1].to_string());
+        std::process::exit(1);
+    }
+}
+// add       Add a new task
+fn add(args: &Vec<String>, store: &mut TaskStore) {
+    // total acceptable args are 5 : ./tt add "task name" -t backend
+    // if len > 5 exit automatically
+    check_len(&args, 5);
+    // 1. Task Name
+    let name = args.get(2).map(|s| s.as_str()).unwrap_or("").to_string();
+    if name == "" {
+        eprintln!("Please specify a task to add!");
+        help(&args);
+        return;
+    }
+    // 2. Tag
+    let tag_arg = args.get(3).map(|s| s.as_str()).unwrap_or("");
+    // get a tag as an Option
+    let tag:Option<String> = match tag_arg {
+        // if tag is explicitly passed
+        "--tag" | "-t" =>args.get(4).cloned(),
+        //if -t | --tag is not passed
+        "" => None,
+        // if something trails the task name
+        _ => {
+            eprintln!("Unknown argument: {}", tag_arg);
+            help(&args);
+            return;
+        }
+    };
+    // 3. Add to the database
+    store.next_id += 1;
+    store.tasks.push(Task{
+        id:store.next_id,
+        name,
+        tag,
+        time:0,
+        status:Status::TODO,
+        started_at:None,
+    });
+    println!("{:?}",store.tasks);
+}
+// start     Start tracking time on a task (pauses any active task)
+fn start(args: &Vec<String>,store: &mut TaskStore) {
+    check_len(args,3);
+    let id = args.get(2).map(|s| s.as_str()).unwrap_or("").to_string();
+    if let Ok(target_id) = id.parse::<u32>() {
+        if let Some(index) = store.tasks.iter().position(|x| x.id == target_id) {
+            stop(args,store);
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+
+            store.tasks[index].started_at = Some(now);
+            store.tasks[index].status = Status::RUNNING;
+        }
+    }
+}
+// stop      Stop the currently running timer
+fn stop(args: &Vec<String>,store: &mut TaskStore) {
+    check_len(args,2);
+    for task in store.tasks.iter_mut() {
+        if matches!(task.status, Status::RUNNING) {
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+            if let Some(started_at) = task.started_at.take() {
+                task.time += now.saturating_sub(started_at);
+            }
+            task.status = Status::PAUSED;
+        }
+    }
+}
+// done      Mark a task as completed
+fn done(args: &Vec<String>,store: &mut TaskStore) {
+    check_len(args,3);
+    let id = args.get(2).map(|s| s.as_str()).unwrap_or("").to_string();
+    if let Ok(target_id) = id.parse::<u32>() {
+
+        for task in store.tasks.iter_mut() {
+            if task.id == target_id {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                if matches!(task.status, Status::RUNNING) {
+                    if let Some(started_at) = task.started_at.take() {
+                        task.time += now.saturating_sub(started_at);
+                    }
+                }
+                task.status = Status::COMPLETED;
+            }
+        }
+    }
+
+}
+// list      Display tasks and logged time
+fn list(args: &Vec<String>,store: &TaskStore) {
+    check_len(args,4);
+    // Tag
+    let tag_arg = args.get(2).map(|s| s.as_str()).unwrap_or("");
+    // get a tag as an Option
+    let tag = match tag_arg {
+        // if tag is explicitly passed
+        "--tag" | "-t" =>args.get(3).map(|s| s.as_str()).unwrap_or("").to_string(),
+        //if -t | --tag is not passed
+        "" | "--all" | "-a" => "".to_string(),
+        // if something trails the task name
+        _ => {
+            eprintln!("Unknown argument: {}", tag_arg);
+            help(&args);
+            return;
+        },
+    };
+    match tag_arg{
+        "-t"|"--tag"|"" => {
+            for task in store.tasks.iter() {
+                if ( tag == "" || task.tag == Some(tag.clone()) ) && !matches!(task.status, Status::COMPLETED) {
+                    println!("{}", task.to_string());
+                };
+            };
+        },
+        "--all"|"-a" => {
+            for task in store.tasks.iter() {
+                println!("{}", task.to_string());
+            }
+        },
+        _=>{}
+    }
+}
+// summary   Show total time grouped by tag
+fn summary(args: &Vec<String>,store: &TaskStore) {
+    check_len(args,2);
+    let mut summary:HashMap<Option<String>,u64> = HashMap::new();
+    for task in store.tasks.iter() {
+        if let Some(time) = summary.get_mut(&task.tag) {
+            *time += task.time;
+        } else {
+            summary.insert(task.tag.clone(), task.time);
+        }
+    }
+    // todo!("Add -a and --all") change the check len tooo to 3 then
+}
+// delete    Remove a task
+fn delete(args: &Vec<String>,store: &mut TaskStore) {
+    check_len(args,3);
+    let id = args.get(2).map(|s| s.as_str()).unwrap_or("").to_string();
+    if let Ok(target_id) = id.parse::<u32>() {
+        if let Some(index) = store.tasks.iter().position(|t| t.id == target_id) {
+            store.tasks.remove(index);
+        }
+    }
+}
