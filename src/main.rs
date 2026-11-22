@@ -3,6 +3,9 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use std::hash::{DefaultHasher,Hash,Hasher};
+
+//todo: implement timezone setup automatically
+
 fn calculate_hash<T: Hash>(t: &T) -> u64 {
     let mut s = DefaultHasher::new();
     t.hash(&mut s);
@@ -35,18 +38,28 @@ pub struct Task{
     pub started_at:Option<u64>
 }
 fn get_formated_time(time_in_s:&u64,duration:bool)-> String {
+    if duration {
         format!("{:>3}H:{:2}M:{:2}S",
-                if duration {time_in_s/3600} else {(time_in_s/3600)%24},
-                (time_in_s/60)%60,
-                time_in_s%60
+                time_in_s / 3600,
+                (time_in_s / 60) % 60,
+                time_in_s % 60
+        ).to_string()
+    }else{
+        format!("{:2}:{:0>2}:{:<2}",
+                (time_in_s / 3600)%24,
+                (time_in_s / 60) % 60,
+                time_in_s % 60
         ).to_string()
     }
+}
 impl Task {
     // ID | TIME | STATUS | NAME
     // Note : in list you will sort by tag so no need to redisplay tag
     fn to_string(&self) -> String{
-        format!(" {:<3}|{} | {:40} | {}",
+        //todo: implement overflow coping logic for names and tags
+        format!(" {:<3} |{:12}|{} | {:40} | {}",
                 self.id,
+                self.tag.as_deref().unwrap_or("No Tag"),
                 get_formated_time(&self.time,true),
                 self.name,
                 if matches!(self.status,Status::RUNNING){
@@ -216,7 +229,7 @@ fn add(args: &Vec<String>, store: &mut TaskStore) {
     // get a tag as an Option
     let tag:Option<String> = match tag_arg {
         // if tag is explicitly passed
-        "--tag" | "-t" =>args.get(4).cloned(),
+        "--tag" | "-t" => args.get(4).cloned(),
         //if -t | --tag is not passed
         "" => None,
         // if something trails the task name
@@ -262,7 +275,10 @@ fn start(args: &Vec<String>,store: &mut TaskStore) {
         else {
             eprintln!("Task \"{}\" does not exist!",id);
         }
-    } else {
+    } else if id == ""{
+        eprintln!("Please specify a task to start!");
+    }
+    else {
         eprintln!("Invalid task \"{}\"",id);
     }
 }
@@ -310,14 +326,33 @@ fn done(args: &Vec<String>,store: &mut TaskStore) {
 // list      Display tasks and logged time
 fn list(args: &Vec<String>,store: &TaskStore) {
     check_len(args,4);
+    println!("  ID |    Tag     |   Elapsed   |                Task Name                 |  Status  \n-----|------------|-------------|------------------------------------------|-----------");
     // Tag
     let tag_arg = args.get(2).map(|s| s.as_str()).unwrap_or("");
     // get a tag as an Option
-    let tag = match tag_arg {
+    match tag_arg {
+        // if no --tag arg
+        "" => {
+            store.tasks.iter().for_each(|task|
+                if !matches!(task.status, Status::COMPLETED){
+                    println!("{}", task.to_string())
+                }
+            )
+        },
         // if tag is explicitly passed
-        "--tag" | "-t" =>args.get(3).map(|s| s.as_str()).unwrap_or("").to_string(),
+        "--tag" | "-t" => {
+            let tag = args.get(3).cloned();
+            store.tasks.iter().for_each(|task|
+                // either user entered a tag, either not
+                if (tag == None && !matches!(task.status, Status::COMPLETED)) || task.tag == tag {
+                    println!("{}", task.to_string());
+                }
+            )
+        },
         //if -t | --tag is not passed
-        "" | "--all" | "-a" |"a"|"all"=> "".to_string(),
+        "--all" | "-a" |"a"|"all" => {
+            store.tasks.iter().for_each(|task| println!("{}", task.to_string()))
+        },
         // if something trails the task name
         _ => {
             eprintln!("Unknown argument: {}", tag_arg);
@@ -325,21 +360,6 @@ fn list(args: &Vec<String>,store: &TaskStore) {
             return;
         },
     };
-    match tag_arg{
-        "-t"|"--tag"|"" => {
-            for task in store.tasks.iter() {
-                if ( tag == "" || task.tag == Some(tag.clone()) ) && !matches!(task.status, Status::COMPLETED) {
-                    println!("{}", task.to_string());
-                };
-            };
-        },
-        "--all"|"-a"|"all"|"a" => {
-            for task in store.tasks.iter() {
-                println!("{}", task.to_string());
-            }
-        },
-        _=>{}
-    }
 }
 // summary   Show total time grouped by tag
 fn summary(args: &[String],store: &TaskStore) {
@@ -348,7 +368,6 @@ fn summary(args: &[String],store: &TaskStore) {
     for task in store.tasks.iter() {
         // entry() looks up the key in HashMap, if not exists then add entry and set val to 0, then += time
         *summary.entry(&task.tag).or_insert(0) += task.time;
-
         /*
          if let Some(time) = summary.get_mut(&task.tag) {
              *time += task.time;
@@ -357,11 +376,22 @@ fn summary(args: &[String],store: &TaskStore) {
          }
          */
     }
+
     let mut entries:Vec<_> = summary.into_iter().collect();
 
     entries.sort();
+    println!(
+        " {:^12}  |  {:^10}\n{:-<12}---|----{:-<10}",
+        "Tags",
+        "Time",
+        "",""
+    );
     for (tag,time) in entries {
-        println!("{:10}   {}", tag.as_deref().unwrap_or("- No Tag -"), get_formated_time(&time, false));
+        println!(
+            " {:12}  | {}",
+            tag.as_deref().unwrap_or("No Tag "),
+            get_formated_time(&time, false)
+        );
     }
 
     // todo!("Add -a and --all") change the check len too to 3 then
