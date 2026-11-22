@@ -159,7 +159,7 @@ fn help_text() -> String {
 
     OPTIONS:
         -h, --help       Print help
-        -V, --version    Print version
+        -v, --version    Print version
 
     EXAMPLES:
         tt add \"Fix login bug\" --tag backend
@@ -324,6 +324,7 @@ fn done(args: &Vec<String>, store: &mut TaskStore) {
             if task.id == target_id {
                 if matches!(task.status, Status::COMPLETED) {
                     eprintln!("Task \"{}\" already completed!", id);
+                    return;
                 }
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -335,6 +336,7 @@ fn done(args: &Vec<String>, store: &mut TaskStore) {
                     }
                 }
                 task.status = Status::COMPLETED;
+                return;
             }
         }
     } else {
@@ -423,6 +425,11 @@ fn delete(args: &Vec<String>, store: &mut TaskStore) -> Option<u32> {
             store.tasks.remove(index);
             return Some(target_id);
         }
+    }else if id == ""{
+        eprintln!("Please specify a task to delete!");
+    }
+    else {
+        eprintln!("Task \"{}\" does not exist!", id);
     }
     None
 }
