@@ -110,10 +110,11 @@ fn main() {
             "list" => list(&args, &store),
             "summary" => summary(&args, &store),
             "delete" => {
-                if let Some(id) = delete(&args, &mut store) {
-                    println!("Task deleted with ID \"{}\"", id);
+                let r= delete(&args, &mut store);
+                if r.is_err() {
+                   eprintln!("Error deleting task: {}", r.err().unwrap());
                 } else {
-                    eprintln!("No task currently running!");
+                    println!("Task deleted with ID \"{}\"", r.unwrap());
                 }
             }
             "help" | "-h" | "--help" => help(&args),
@@ -417,19 +418,20 @@ fn summary(args: &[String], store: &TaskStore) {
     // todo!("Add -a and --all") change the check len too to 3 then
 }
 // delete    Remove a task
-fn delete(args: &Vec<String>, store: &mut TaskStore) -> Option<u32> {
+fn delete(args: &Vec<String>, store: &mut TaskStore) -> Result<String,String> {
     check_len(args, 3);
     let id = args.get(2).map(|s| s.as_str()).unwrap_or("").to_string();
     if let Ok(target_id) = id.parse::<u32>() {
-        if let Some(index) = store.tasks.iter().position(|t| t.id == target_id) {
+        return if let Some(index) = store.tasks.iter().position(|t| t.id == target_id) {
             store.tasks.remove(index);
-            return Some(target_id);
+            Result::Ok(id)
+        } else {
+            Err(format!("Task \"{}\" does not exist!", id))
         }
-    }else if id == ""{
-        eprintln!("Please specify a task to delete!");
+    } else if id == ""{
+        Err("Please specify a task to delete!".to_string())
     }
     else {
-        eprintln!("Task \"{}\" does not exist!", id);
+        Err(format!("\"{}\" is not a valid Task ID!", id))
     }
-    None
 }
