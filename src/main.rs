@@ -8,7 +8,7 @@ fn calculate_hash<T: Hash>(t: &T) -> u64 {
     t.hash(&mut s);
     s.finish()
 }
-#[derive(Serialize, Deserialize, Debug, Hash)]
+#[derive(Serialize, Deserialize, Hash)]
 pub enum Status{
     RUNNING,
     PAUSED,
@@ -25,7 +25,7 @@ impl Status{
         }
     }
 }
-#[derive(Serialize, Deserialize, Debug, Hash)]
+#[derive(Serialize, Deserialize, Hash)]
 pub struct Task{
     pub id: u32,
     pub name:String,
@@ -34,9 +34,9 @@ pub struct Task{
     pub status:Status,
     pub started_at:Option<u64>
 }
-fn get_formated_time(time_in_s:&u64)-> String {
-        format!("{}H:{}M:{}S",
-                (time_in_s/3600)%24,
+fn get_formated_time(time_in_s:&u64,duration:bool)-> String {
+        format!("{:>3}H:{:2}M:{:2}S",
+                if duration {time_in_s/3600} else {(time_in_s/3600)%24},
                 (time_in_s/60)%60,
                 time_in_s%60
         ).to_string()
@@ -45,12 +45,15 @@ impl Task {
     // ID | TIME | STATUS | NAME
     // Note : in list you will sort by tag so no need to redisplay tag
     fn to_string(&self) -> String{
-        format!("{} | {} | {} | {} | Start Time: {}",
+        format!(" {:<3}|{} | {:40} | {}",
                 self.id,
-                get_formated_time(&self.time),
-                self.status.to_string(),
+                get_formated_time(&self.time,true),
                 self.name,
-                get_formated_time(&self.started_at.unwrap_or(0)),
+                if matches!(self.status,Status::RUNNING){
+                    format!("Start: {} UTC",get_formated_time(&self.started_at.unwrap_or(0),false))
+                } else {
+                    self.status.to_string()
+                },
         ).to_string()
     }
 }
@@ -75,12 +78,21 @@ fn main() {
             "start" => start(&args,&mut store),
             "stop"  => {
                 check_len(&args,2);
-                stop(&mut store);
+                if let Some(id) = stop(&mut store){
+                    println!("1 Task stopped. ID \"{}\"",id);
+                } else {
+                    eprintln!("No task currently running!");
+                }
+                ;
             },
             "done" => done(&args,&mut store),
             "list" =>list(&args,&store),
             "summary" => summary(&args,&store),
-            "delete" => delete(&args,&mut store),
+            "delete" => if let Some(id) =  delete(&args,&mut store){
+                println!("Task deleted with ID \"{}\"",id);
+            } else {
+                eprintln!("No task currently running!");
+            },
             "help" | "-h" | "--help" => help(&args),
             "-v" | "--version" => println!("tt v{}", APP_VERSION),
             _ => println!("Unknown command: {}", args[1]),
@@ -153,7 +165,7 @@ fn help(args: &Vec<String>) {
             "stop" => println!("Usage: tt stop\nStop the currently running timer."),
             "done" => println!("Usage: tt done <ID>\nMark a task as completed."),
             "list" => println!("Usage: tt list [--all] [--tag | -t <TAG>]\nDisplay tasks and logged time."),
-            "summary" => println!("Usage: tt summary [--all | -a]\nShow total time grouped by tag."),
+            "summary" => println!("Usage: tt summary [-a | --all]\nShow total time grouped by tag."),
             "delete" => println!("Usage: tt delete <ID>\nRemove a task."),
             "--help"|"-h"|"help"|"" => println!("{}",help_text()),
             _ => {
@@ -180,7 +192,7 @@ fn help_asked(args:&Vec<String>) -> bool{
 }
 
 // if arg.len() > max exit the program
-fn check_len(args:&Vec<String>,max_len:usize) {
+fn check_len(args:&[String],max_len:usize) {
     if args.len() > max_len{
         eprintln!("Too many arguments for {}.",args[1]);
         help_for(args[1].to_string());
@@ -194,7 +206,7 @@ fn add(args: &Vec<String>, store: &mut TaskStore) {
     check_len(&args, 5);
     // 1. Task Name
     let name = args.get(2).map(|s| s.as_str()).unwrap_or("").to_string();
-    if name == "" {
+    if name.is_empty() {
         eprintln!("Please specify a task to add!");
         help(&args);
         return;
@@ -232,19 +244,30 @@ fn start(args: &Vec<String>,store: &mut TaskStore) {
     let id = args.get(2).map(|s| s.as_str()).unwrap_or("").to_string();
     if let Ok(target_id) = id.parse::<u32>() {
         if let Some(index) = store.tasks.iter().position(|x| x.id == target_id) {
-            stop(store);
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
+            if store.tasks[index].started_at.is_some(){
+                eprintln!("Task \"{}\" already started!",id);
+            } else if matches!(store.tasks[index].status, Status::COMPLETED) {
+                eprintln!("Task \"{}\" already completed!",id);
+            } else {
+                stop(store);
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
 
-            store.tasks[index].started_at = Some(now);
-            store.tasks[index].status = Status::RUNNING;
+                store.tasks[index].started_at = Some(now);
+                store.tasks[index].status = Status::RUNNING;
+            }
         }
+        else {
+            eprintln!("Task \"{}\" does not exist!",id);
+        }
+    } else {
+        eprintln!("Invalid task \"{}\"",id);
     }
 }
 // stop      Stop the currently running timer
-fn stop(store: &mut TaskStore) {
+fn stop(store: &mut TaskStore) -> Option<u32>{
     for task in store.tasks.iter_mut() {
         if matches!(task.status, Status::RUNNING) {
             let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
@@ -252,17 +275,21 @@ fn stop(store: &mut TaskStore) {
                 task.time += now.saturating_sub(started_at);
             }
             task.status = Status::PAUSED;
+            return Some(task.id);
         }
     }
+    None
 }
 // done      Mark a task as completed
 fn done(args: &Vec<String>,store: &mut TaskStore) {
     check_len(args,3);
     let id = args.get(2).map(|s| s.as_str()).unwrap_or("").to_string();
     if let Ok(target_id) = id.parse::<u32>() {
-
         for task in store.tasks.iter_mut() {
             if task.id == target_id {
+                if matches!(task.status, Status::COMPLETED) {
+                    eprintln!("Task \"{}\" already completed!",id);
+                }
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
@@ -275,6 +302,8 @@ fn done(args: &Vec<String>,store: &mut TaskStore) {
                 task.status = Status::COMPLETED;
             }
         }
+    } else {
+        eprintln!("Task \"{}\" does not exist!",id);
     }
 
 }
@@ -313,28 +342,39 @@ fn list(args: &Vec<String>,store: &TaskStore) {
     }
 }
 // summary   Show total time grouped by tag
-fn summary(args: &Vec<String>,store: &TaskStore) {
+fn summary(args: &[String],store: &TaskStore) {
     check_len(args,2);
-    let mut summary:HashMap<Option<String>,u64> = HashMap::new();
+    let mut summary:HashMap<&Option<String>,u64> = HashMap::new();
     for task in store.tasks.iter() {
-        if let Some(time) = summary.get_mut(&task.tag) {
-            *time += task.time;
-        } else {
-            summary.insert(task.tag.clone(), task.time);
-        }
+        // entry() looks up the key in HashMap, if not exists then add entry and set val to 0, then += time
+        *summary.entry(&task.tag).or_insert(0) += task.time;
+
+        /*
+         if let Some(time) = summary.get_mut(&task.tag) {
+             *time += task.time;
+         } else {
+             summary.insert(task.tag.clone(), task.time);
+         }
+         */
     }
-    for s in summary.keys() {
-        println!("{}   {}", s.clone().unwrap_or_default(),get_formated_time(summary.get(s).unwrap()));
+    let mut entries:Vec<_> = summary.into_iter().collect();
+
+    entries.sort();
+    for (tag,time) in entries {
+        println!("{:10}   {}", tag.as_deref().unwrap_or("- No Tag -"), get_formated_time(&time, false));
     }
-    // todo!("Add -a and --all") change the check len tooo to 3 then
+
+    // todo!("Add -a and --all") change the check len too to 3 then
 }
 // delete    Remove a task
-fn delete(args: &Vec<String>,store: &mut TaskStore) {
+fn delete(args: &Vec<String>,store: &mut TaskStore)-> Option<u32> {
     check_len(args,3);
     let id = args.get(2).map(|s| s.as_str()).unwrap_or("").to_string();
     if let Ok(target_id) = id.parse::<u32>() {
         if let Some(index) = store.tasks.iter().position(|t| t.id == target_id) {
             store.tasks.remove(index);
+            return Some(target_id);
         }
     }
+    None
 }
