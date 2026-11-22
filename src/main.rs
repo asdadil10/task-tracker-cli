@@ -1,4 +1,4 @@
-use std::{env};
+use std::{env, fs};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
@@ -73,7 +73,10 @@ fn main() {
         match args[1].as_str() {
             "add" => add(&args,&mut store),
             "start" => start(&args,&mut store),
-            "stop"  => stop(&args,&mut store),
+            "stop"  => {
+                check_len(&args,2);
+                stop(&mut store);
+            },
             "done" => done(&args,&mut store),
             "list" =>list(&args,&store),
             "summary" => summary(&args,&store),
@@ -83,19 +86,26 @@ fn main() {
             _ => println!("Unknown command: {}", args[1]),
         }
         if calculate_hash(&store) != before{
-            save_store(&store);
+            if let Err(err) = save_store(&store) {
+                eprintln!("Error saving tasks: {err}");
+            }
         }
     }
 }
 
 fn load_store() -> Option<TaskStore>{
-    //println!("Loading store...");
-    None
-    //todo!("Implement loading of store");
+    println!("Loading store...");
+    // file reading
+    let data = fs::read_to_string("tasks.json").ok()?;
+    let loaded_store : TaskStore = serde_json::from_str(&data).ok()?;
+    println!("Loaded: From tasks.json");
+    Some(loaded_store)
 }
-fn save_store(store: &TaskStore) {
+fn save_store(store: &TaskStore) -> Result<(),Box<dyn std::error::Error>>{
     println!("Saving...");
-    //todo!("Implement storing the updated tasks.json")
+    let data = serde_json::to_string(&store)?;
+    fs::write("tasks.json", data)?;
+    Ok(())
 }
 
 fn help_text() -> String{
@@ -214,7 +224,7 @@ fn add(args: &Vec<String>, store: &mut TaskStore) {
         status:Status::TODO,
         started_at:None,
     });
-    println!("{:?}",store.tasks);
+    //println!("{:?}",store.tasks);
 }
 // start     Start tracking time on a task (pauses any active task)
 fn start(args: &Vec<String>,store: &mut TaskStore) {
@@ -222,7 +232,7 @@ fn start(args: &Vec<String>,store: &mut TaskStore) {
     let id = args.get(2).map(|s| s.as_str()).unwrap_or("").to_string();
     if let Ok(target_id) = id.parse::<u32>() {
         if let Some(index) = store.tasks.iter().position(|x| x.id == target_id) {
-            stop(args,store);
+            stop(store);
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -234,8 +244,7 @@ fn start(args: &Vec<String>,store: &mut TaskStore) {
     }
 }
 // stop      Stop the currently running timer
-fn stop(args: &Vec<String>,store: &mut TaskStore) {
-    check_len(args,2);
+fn stop(store: &mut TaskStore) {
     for task in store.tasks.iter_mut() {
         if matches!(task.status, Status::RUNNING) {
             let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
@@ -279,7 +288,7 @@ fn list(args: &Vec<String>,store: &TaskStore) {
         // if tag is explicitly passed
         "--tag" | "-t" =>args.get(3).map(|s| s.as_str()).unwrap_or("").to_string(),
         //if -t | --tag is not passed
-        "" | "--all" | "-a" => "".to_string(),
+        "" | "--all" | "-a" |"a"|"all"=> "".to_string(),
         // if something trails the task name
         _ => {
             eprintln!("Unknown argument: {}", tag_arg);
@@ -295,7 +304,7 @@ fn list(args: &Vec<String>,store: &TaskStore) {
                 };
             };
         },
-        "--all"|"-a" => {
+        "--all"|"-a"|"all"|"a" => {
             for task in store.tasks.iter() {
                 println!("{}", task.to_string());
             }
@@ -313,6 +322,9 @@ fn summary(args: &Vec<String>,store: &TaskStore) {
         } else {
             summary.insert(task.tag.clone(), task.time);
         }
+    }
+    for s in summary.keys() {
+        println!("{}   {}", s.clone().unwrap_or_default(),get_formated_time(summary.get(s).unwrap()));
     }
     // todo!("Add -a and --all") change the check len tooo to 3 then
 }
