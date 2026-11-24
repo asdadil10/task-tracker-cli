@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{env, fs};
-
+use std::ops::Add;
 //todo: implement timezone setup automatically
 
 fn calculate_hash<T: Hash>(t: &T) -> u64 {
@@ -56,17 +56,25 @@ fn get_formated_time(time_in_s: &u64, duration: bool) -> String {
         .to_string()
     }
 }
+fn dots_string(mut s:  String, before:usize) -> String {
+    if s.len() <= before {
+        s
+    } else {
+        let _=s.split_off(before-2);
+        s.add("..")
+    }
+}
+
 impl Task {
     // ID | TIME | STATUS | NAME
     // Note : in list you will sort by tag so no need to redisplay tag
     fn to_string(&self) -> String {
-        //todo: implement overflow coping logic for names and tags
         format!(
             " {:<3} |{:12}|{} | {:40} | {}",
             self.id,
-            self.tag.as_deref().unwrap_or("No Tag"),
+            dots_string(self.tag.as_deref().unwrap_or("No Tag").to_string(),12),
             get_formated_time(&self.time, true),
-            self.name,
+            dots_string(self.name.clone(),40),
             if matches!(self.status, Status::RUNNING) {
                 format!(
                     "Start: {} UTC",
@@ -76,7 +84,23 @@ impl Task {
                 self.status.to_string()
             },
         )
-        .to_string()
+    }
+    fn to_string_verbose(&self) -> String {
+        format!(
+            "ID:  {:<33} | Time Elapsed:{:<25} \nTag: {:<33} | {:>}\n\n{}",
+            self.id,
+            get_formated_time(&self.time, true),
+            self.tag.as_deref().unwrap_or("No Tag"),
+            if matches!(self.status, Status::RUNNING) {
+                format!(
+                    "Start: {} UTC",
+                    get_formated_time(&self.started_at.unwrap_or(0), false)
+                )
+            } else {
+                self.status.to_string()
+            },
+            self.name,
+        )
     }
 }
 #[derive(Serialize, Deserialize, Default, Hash)]
@@ -94,6 +118,13 @@ fn main() {
     if args.len() < 2 {
         println!("No argument provided...");
         help(&args)
+    } else if args.len() == 2 && let Ok(id) = args[1].parse::<u32>() {
+        store.tasks.iter().for_each(|task| {
+            if task.id == id {
+                println!("\n{}\n", task.to_string_verbose());
+                return;
+            }
+        })
     } else if !help_asked(&args) {
         match args[1].as_str() {
             "add" => add(&args, &mut store),
@@ -157,6 +188,7 @@ fn help_text() -> String {
         summary   Show total time grouped by tag
         delete    Remove a task
         help      Print this message or the help of the given subcommand(s)
+        <id>      Prints the specific task's details
 
     OPTIONS:
         -h, --help       Print help
@@ -166,6 +198,7 @@ fn help_text() -> String {
         tt add \"Fix login bug\" --tag backend
         tt start 1
         tt list --tag backend
+        tt 7
         tt done 1"
         .to_string()
 }
