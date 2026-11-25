@@ -4,8 +4,9 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{env, fs};
 use std::ops::Add;
-//todo: implement timezone setup automatically
+use chrono::Local;
 
+//todo: implement timezone setup automatically
 fn calculate_hash<T: Hash>(t: &T) -> u64 {
     let mut s = DefaultHasher::new();
     t.hash(&mut s);
@@ -37,7 +38,7 @@ pub struct Task {
     pub status: Status,
     pub started_at: Option<u64>,
 }
-fn get_formated_time(time_in_s: &u64, duration: bool) -> String {
+fn get_formated_time(time_in_s: &u64, duration: bool, offset: i32) -> String {
     if duration {
         format!(
             "{:>3}H:{:2}M:{:2}S",
@@ -47,11 +48,17 @@ fn get_formated_time(time_in_s: &u64, duration: bool) -> String {
         )
         .to_string()
     } else {
+        // Apply offset safely using i64
+        let adjusted_s = (*time_in_s as i64) + offset as i64;
+
+        // Wrap cleanly within a 24-hour day (86400 seconds)
+        let seconds_in_day = adjusted_s.rem_euclid(86400);
+
         format!(
-            "{:2}:{:0>2}:{:<2}",
-            (time_in_s / 3600) % 24,
-            (time_in_s / 60) % 60,
-            time_in_s % 60
+            "{:02}:{:02}:{:02}",
+            seconds_in_day / 3600,
+            (seconds_in_day / 60) % 60,
+            seconds_in_day % 60
         )
         .to_string()
     }
@@ -68,17 +75,18 @@ fn dots_string(mut s:  String, before:usize) -> String {
 impl Task {
     // ID | TIME | STATUS | NAME
     // Note : in list you will sort by tag so no need to redisplay tag
+
     fn to_string(&self) -> String {
         format!(
             " {:<3} |{:12}|{} | {:40} | {}",
             self.id,
             dots_string(self.tag.as_deref().unwrap_or("No Tag").to_string(),12),
-            get_formated_time(&self.time, true),
+            get_formated_time(&self.time, true,0),
             dots_string(self.name.clone(),40),
             if matches!(self.status, Status::RUNNING) {
                 format!(
-                    "Start: {} UTC",
-                    get_formated_time(&self.started_at.unwrap_or(0), false)
+                    "Start: {} Local Time",
+                    get_formated_time(&self.started_at.unwrap_or(0), false,Local::now().offset().local_minus_utc())
                 )
             } else {
                 self.status.to_string()
@@ -86,15 +94,16 @@ impl Task {
         )
     }
     fn to_string_verbose(&self) -> String {
+
         format!(
             "ID:  {:<33} | Time Elapsed:{:<25} \nTag: {:<33} | {:>}\n\n{}",
             self.id,
-            get_formated_time(&self.time, true),
+            get_formated_time(&self.time, true,0),
             self.tag.as_deref().unwrap_or("No Tag"),
             if matches!(self.status, Status::RUNNING) {
                 format!(
-                    "Start: {} UTC",
-                    get_formated_time(&self.started_at.unwrap_or(0), false)
+                    "Start: {} Local Time",
+                    get_formated_time(&self.started_at.unwrap_or(0), false,Local::now().offset().local_minus_utc())
                 )
             } else {
                 self.status.to_string()
@@ -110,6 +119,7 @@ pub struct TaskStore {
 }
 const APP_VERSION: &str = "0.1.0";
 fn main() {
+
     let args: Vec<String> = env::args().collect();
     let mut store = load_store().unwrap_or_default();
     let before = calculate_hash(&store);
@@ -444,7 +454,7 @@ fn summary(args: &[String], store: &TaskStore) {
         println!(
             " {:12}  | {}",
             tag.as_deref().unwrap_or("No Tag "),
-            get_formated_time(&time, false)
+            get_formated_time(&time, false, 0)
         );
     }
 
