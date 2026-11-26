@@ -345,7 +345,7 @@ fn stop(store: &mut TaskStore) -> Option<u32> {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-            if let Some(start_time) = task.start_time {
+            if let Some(start_time) = task.start_time.take() {
                 task.time += now.saturating_sub(start_time);
             }
             task.status = Status::PAUSED;
@@ -370,7 +370,7 @@ fn done(args: &Vec<String>, store: &mut TaskStore) {
                     .unwrap()
                     .as_secs();
                 if matches!(task.status, Status::RUNNING) {
-                    if let Some(start_time) = task.start_time {
+                    if let Some(start_time) = task.start_time.take() {
                         task.time += now.saturating_sub(start_time);
                     }
                 }
@@ -446,6 +446,8 @@ fn summary(args: &[String], store: &TaskStore) {
     }
 
     // todo!("Add -a and --all") change the check len too to 3 then
+    // also it would need to implement some type of method to tract the time locked in a specific
+    // task in the last week.
 }
 // delete    Remove a task
 fn delete(args: &Vec<String>, store: &mut TaskStore) -> Result<String,String> {
@@ -457,6 +459,22 @@ fn delete(args: &Vec<String>, store: &mut TaskStore) -> Result<String,String> {
             Ok(id)
         } else {
             Err(format!("Task \"{}\" does not exist!", id))
+        }
+    } else if id == "done" {
+        let mut ids:Vec<_> = Vec::new();
+        let mut i= 0;
+        while i < store.tasks.len() {
+            if matches!(store.tasks[i].status, Status::COMPLETED) {
+                store.tasks.remove(i);
+                ids.push(i);
+            }
+            i += 1;
+        }
+        if !id.is_empty(){
+            Ok(id)
+            //todo: return ids deleted stored in ids:Vec<>
+        } else {
+            Err("No task completed yet!".to_string())
         }
     } else if id == ""{
         Err("Please specify a task to delete!".to_string())
