@@ -123,12 +123,16 @@ fn main() {
         println!("No argument provided...");
         help(&args)
     } else if args.len() == 2 && let Ok(id) = args[1].parse::<u32>() {
+        let found = false;
         store.tasks.iter().for_each(|task| {
             if task.id == id {
                 println!("\n{}\n", task.to_string_verbose());
                 return;
             }
-        })
+        });
+        if !found{
+            println!("\n Task {} not found!\n", args[1]);
+        }
     } else if !help_asked(&args) {
         match args[1].as_str() {
             "add" => add(&args, &mut store),
