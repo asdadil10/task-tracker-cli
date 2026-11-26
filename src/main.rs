@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{env, fs};
-use std::ops::Add;
 use chrono::Local;
 
 
@@ -63,12 +62,12 @@ fn get_formated_time(time_in_s: &u64, duration: bool, offset: i32) -> String {
         .to_string()
     }
 }
-fn dots_string(mut s:  String, before:usize) -> String {
-    if s.len() <= before {
+fn dots_string(s: String, before: usize) -> String {
+    if s.chars().count() <= before {
         s
     } else {
-        let _=s.split_off(before-2);
-        s.add("..")
+        let truncated: String = s.chars().take(before.saturating_sub(2)).collect();
+        format!("{}..", truncated)
     }
 }
 
@@ -354,30 +353,31 @@ fn stop(store: &mut TaskStore) -> Option<u32> {
     }
     None
 }
+
 // done      Mark a task as completed
-fn done(args: &Vec<String>, store: &mut TaskStore) {
+fn done(args: &[String], store: &mut TaskStore) {
     check_len(args, 3);
-    let id = args.get(2).map(|s| s.as_str()).unwrap_or("").to_string();
-    if let Ok(target_id) = id.parse::<u32>() {
-        for task in store.tasks.iter_mut() {
-            if task.id == target_id {
-                if matches!(task.status, Status::COMPLETED) {
-                    eprintln!("Task \"{}\" already completed!", id);
-                    return;
-                }
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
-                if matches!(task.status, Status::RUNNING) {
-                    if let Some(start_time) = task.start_time.take() {
-                        task.time += now.saturating_sub(start_time);
-                    }
-                }
-                task.status = Status::COMPLETED;
-                return;
+    let id = args.get(2).map(|s| s.as_str()).unwrap_or("");
+    let Ok(target_id) = id.parse::<u32>() else {
+        eprintln!("Invalid task ID \"{}\"", id);
+        return;
+    };
+
+    if let Some(task) = store.tasks.iter_mut().find(|t| t.id == target_id) {
+        if matches!(task.status, Status::COMPLETED) {
+            eprintln!("Task \"{}\" already completed!", id);
+            return;
+        }
+        if matches!(task.status, Status::RUNNING) {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            if let Some(start_time) = task.start_time.take() {
+                task.time += now.saturating_sub(start_time);
             }
         }
+        task.status = Status::COMPLETED;
     } else {
         eprintln!("Task \"{}\" does not exist!", id);
     }
@@ -441,13 +441,9 @@ fn summary(args: &[String], store: &TaskStore) {
         println!(
             " {:12}  | {}",
             tag.as_deref().unwrap_or("No Tag "),
-            get_formated_time(&time, false, 0)
+            get_formated_time(&time, true, 0)
         );
     }
-
-    // todo!("Add -a and --all") change the check len too to 3 then
-    // also it would need to implement some type of method to tract the time locked in a specific
-    // task in the last week.
 }
 // delete    Remove a task
 fn delete(args: &Vec<String>, store: &mut TaskStore) -> Result<String,String> {
@@ -461,20 +457,18 @@ fn delete(args: &Vec<String>, store: &mut TaskStore) -> Result<String,String> {
             Err(format!("Task \"{}\" does not exist!", id))
         }
     } else if id == "done" {
-        let mut ids:Vec<_> = Vec::new();
-        let mut i= 0;
-        while i < store.tasks.len() {
-            if matches!(store.tasks[i].status, Status::COMPLETED) {
-                store.tasks.remove(i);
-                ids.push(i);
-            }
-            i += 1;
-        }
-        if !id.is_empty(){
-            Ok(id)
-            //todo: return ids deleted stored in ids:Vec<>
+        let deleted_ids: Vec<String> = store
+            .tasks
+            .iter()
+            .filter(|t| matches!(t.status, Status::COMPLETED))
+            .map(|t| t.id.to_string())
+            .collect();
+
+        if deleted_ids.is_empty() {
+            Err("No completed tasks to delete!".to_string())
         } else {
-            Err("No task completed yet!".to_string())
+            store.tasks.retain(|t| !matches!(t.status, Status::COMPLETED));
+            Ok(deleted_ids.join(", "))
         }
     } else if id == ""{
         Err("Please specify a task to delete!".to_string())
