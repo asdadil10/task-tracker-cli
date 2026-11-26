@@ -6,7 +6,7 @@ use std::{env, fs};
 use std::ops::Add;
 use chrono::Local;
 
-//todo: implement timezone setup automatically
+
 fn calculate_hash<T: Hash>(t: &T) -> u64 {
     let mut s = DefaultHasher::new();
     t.hash(&mut s);
@@ -75,7 +75,16 @@ fn dots_string(mut s:  String, before:usize) -> String {
 impl Task {
     // ID | TIME | STATUS | NAME
     // Note : in list you will sort by tag so no need to redisplay tag
-
+    fn get_status(&self)->String{
+        if matches!(self.status, Status::RUNNING) {
+            format!(
+                "Start: {} Local Time",
+                get_formated_time(&self.started_at.unwrap_or(0), false,Local::now().offset().local_minus_utc())
+            )
+        } else {
+            self.status.to_string()
+        }
+    }
     fn to_string(&self) -> String {
         format!(
             " {:<3} |{:12}|{} | {:40} | {}",
@@ -83,14 +92,7 @@ impl Task {
             dots_string(self.tag.as_deref().unwrap_or("No Tag").to_string(),12),
             get_formated_time(&self.time, true,0),
             dots_string(self.name.clone(),40),
-            if matches!(self.status, Status::RUNNING) {
-                format!(
-                    "Start: {} Local Time",
-                    get_formated_time(&self.started_at.unwrap_or(0), false,Local::now().offset().local_minus_utc())
-                )
-            } else {
-                self.status.to_string()
-            },
+            self.get_status(),
         )
     }
     fn to_string_verbose(&self) -> String {
@@ -100,14 +102,7 @@ impl Task {
             self.id,
             get_formated_time(&self.time, true,0),
             self.tag.as_deref().unwrap_or("No Tag"),
-            if matches!(self.status, Status::RUNNING) {
-                format!(
-                    "Start: {} Local Time",
-                    get_formated_time(&self.started_at.unwrap_or(0), false,Local::now().offset().local_minus_utc())
-                )
-            } else {
-                self.status.to_string()
-            },
+            self.get_status(),
             self.name,
         )
     }
@@ -274,7 +269,7 @@ fn check_len(args: &[String], max_len: usize) {
         std::process::exit(1);
     }
 }
-// add       Add a new task
+// add-Add a new task
 fn add(args: &Vec<String>, store: &mut TaskStore) {
     // total acceptable args are 5 : ./tt add "task name" -t backend
     // if len > 5 exit automatically
@@ -313,7 +308,7 @@ fn add(args: &Vec<String>, store: &mut TaskStore) {
     });
     //println!("{:?}",store.tasks);
 }
-// start     Start tracking time on a task (pauses any active task)
+// start-Start tracking time on a task (pauses any active task)
 fn start(args: &Vec<String>, store: &mut TaskStore) {
     check_len(args, 3);
     let id = args.get(2).map(|s| s.as_str()).unwrap_or("").to_string();
@@ -342,7 +337,7 @@ fn start(args: &Vec<String>, store: &mut TaskStore) {
         eprintln!("Invalid task \"{}\"", id);
     }
 }
-// stop      Stop the currently running timer
+// stop-Stop the currently running timer
 fn stop(store: &mut TaskStore) -> Option<u32> {
     for task in store.tasks.iter_mut() {
         if matches!(task.status, Status::RUNNING) {
