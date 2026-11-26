@@ -36,7 +36,7 @@ pub struct Task {
     pub tag: Option<String>,
     pub time: u64,
     pub status: Status,
-    pub started_at: Option<u64>,
+    pub start_time: Option<u64>,
 }
 fn get_formated_time(time_in_s: &u64, duration: bool, offset: i32) -> String {
     if duration {
@@ -79,7 +79,7 @@ impl Task {
         if matches!(self.status, Status::RUNNING) {
             format!(
                 "Start: {} Local Time",
-                get_formated_time(&self.started_at.unwrap_or(0), false,Local::now().offset().local_minus_utc())
+                get_formated_time(&self.start_time.unwrap_or(0), false,Local::now().offset().local_minus_utc())
             )
         } else {
             self.status.to_string()
@@ -304,7 +304,7 @@ fn add(args: &Vec<String>, store: &mut TaskStore) {
         tag,
         time: 0,
         status: Status::TODO,
-        started_at: None,
+        start_time: None,
     });
     //println!("{:?}",store.tasks);
 }
@@ -314,7 +314,7 @@ fn start(args: &Vec<String>, store: &mut TaskStore) {
     let id = args.get(2).map(|s| s.as_str()).unwrap_or("").to_string();
     if let Ok(target_id) = id.parse::<u32>() {
         if let Some(index) = store.tasks.iter().position(|x| x.id == target_id) {
-            if store.tasks[index].started_at.is_some() {
+            if store.tasks[index].start_time.is_some() {
                 eprintln!("Task \"{}\" already started!", id);
             } else if matches!(store.tasks[index].status, Status::COMPLETED) {
                 eprintln!("Task \"{}\" already completed!", id);
@@ -325,7 +325,7 @@ fn start(args: &Vec<String>, store: &mut TaskStore) {
                     .unwrap()
                     .as_secs();
 
-                store.tasks[index].started_at = Some(now);
+                store.tasks[index].start_time = Some(now);
                 store.tasks[index].status = Status::RUNNING;
             }
         } else {
@@ -345,8 +345,8 @@ fn stop(store: &mut TaskStore) -> Option<u32> {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-            if let Some(started_at) = task.started_at.take() {
-                task.time += now.saturating_sub(started_at);
+            if let Some(start_time) = task.start_time {
+                task.time += now.saturating_sub(start_time);
             }
             task.status = Status::PAUSED;
             return Some(task.id);
@@ -370,8 +370,8 @@ fn done(args: &Vec<String>, store: &mut TaskStore) {
                     .unwrap()
                     .as_secs();
                 if matches!(task.status, Status::RUNNING) {
-                    if let Some(started_at) = task.started_at.take() {
-                        task.time += now.saturating_sub(started_at);
+                    if let Some(start_time) = task.start_time {
+                        task.time += now.saturating_sub(start_time);
                     }
                 }
                 task.status = Status::COMPLETED;
@@ -427,19 +427,11 @@ fn summary(args: &[String], store: &TaskStore) {
     check_len(args, 2);
     let mut summary: HashMap<&Option<String>, u64> = HashMap::new();
     for task in store.tasks.iter() {
-        // entry() looks up the key in HashMap, if not exists then add entry and set val to 0, then += time
         *summary.entry(&task.tag).or_insert(0) += task.time;
-        /*
-        if let Some(time) = summary.get_mut(&task.tag) {
-            *time += task.time;
-        } else {
-            summary.insert(task.tag.clone(), task.time);
-        }
-        */
     }
-
+    
     let mut entries: Vec<_> = summary.into_iter().collect();
-
+    
     entries.sort();
     println!(
         " {:^12}  |  {:^10}\n{:-<12}---|----{:-<10}",
